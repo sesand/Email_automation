@@ -16,12 +16,28 @@ interface GeminiResponse {
 export class ProviderConfigurationError extends Error {}
 export class ProviderRateLimitError extends Error {}
 export class ProviderTimeoutError extends Error {}
-export class ProviderRequestError extends Error {}
+export class ProviderRequestError extends Error {
+  constructor(message: string, public readonly status?: number) { super(message); }
+}
 
 class ModelAttemptError extends Error {
-  constructor(public readonly kind: 'rate-limit' | 'timeout' | 'request', public readonly retryable: boolean) {
+  constructor(
+    public readonly kind: 'rate-limit' | 'timeout' | 'request',
+    public readonly retryable: boolean,
+    public readonly status?: number,
+  ) {
     super(`Gemini model attempt failed: ${kind}`);
   }
+}
+
+function normalizeApiKey(rawValue: string | undefined): string | undefined {
+  if (!rawValue) return undefined;
+  let value = rawValue.trim();
+  if (value.startsWith('GEMINI_API_KEY=')) value = value.slice('GEMINI_API_KEY='.length).trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1).trim();
+  }
+  return value || undefined;
 }
 
 function parseModelList(primary: string, fallbacks: string): string[] {
@@ -38,7 +54,7 @@ function parseModelList(primary: string, fallbacks: string): string[] {
 
 function readConfig(): ProviderConfig {
   const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = normalizeApiKey(process.env.GEMINI_API_KEY || process.env.AI_API_KEY);
   const primary = process.env.AI_MODEL?.trim() || DEFAULT_MODEL;
   const fallbacks = process.env.AI_FALLBACK_MODELS?.trim() || DEFAULT_FALLBACK_MODELS.join(',');
   const baseUrl = (process.env.GEMINI_API_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/$/, '');
@@ -91,7 +107,7 @@ async function callGeminiModel(config: ProviderConfig, model: string, input: Val
 
     if (!response.ok) {
       const kind = response.status === 429 ? 'rate-limit' : 'request';
-      throw new ModelAttemptError(kind, RETRYABLE_STATUSES.has(response.status));
+      throw new ModelAttemptError(kind, RETRYABLE_STATUSES.has(response.status), response.status);
     }
 
     const data = await response.json() as GeminiResponse;
@@ -127,5 +143,5 @@ export async function generateWithAi(input: ValidatedEmailRequest): Promise<stri
 
   if (lastError?.kind === 'rate-limit') throw new ProviderRateLimitError('Gemini rate limit reached.');
   if (lastError?.kind === 'timeout') throw new ProviderTimeoutError('Gemini models timed out.');
-  throw new ProviderRequestError('Gemini generation failed.');
+  throw new ProviderRequestError('Gemini generation failed.', lastError?.status);
 }

@@ -40,6 +40,14 @@ describe('Gemini provider fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('normalizes a key copied in env-file format', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'GEMINI_API_KEY="test-key"');
+    const fetchMock = vi.fn().mockResolvedValue(successResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    await generateWithAi(input);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ headers: expect.objectContaining({ 'x-goog-api-key': 'test-key' }) });
+  });
+
   it('sends the API key in a server-side Gemini header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(successResponse());
     vi.stubGlobal('fetch', fetchMock);
