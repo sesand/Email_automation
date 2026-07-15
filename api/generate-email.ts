@@ -22,7 +22,22 @@ function fail(res: VercelResponse, status: number, code: string, message: string
   return res.status(status).json({ success: false, error: { code, message } });
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+function getClientIp(req: VercelRequest): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  const forwardedIp = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0])?.trim();
+  return forwardedIp || req.socket?.remoteAddress || 'unknown';
+}
+
+function getRequestBody(req: VercelRequest): unknown {
+  if (typeof req.body !== 'string') return req.body;
+  try {
+    return JSON.parse(req.body) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+async function handleRequest(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   if (req.method !== 'POST') {
@@ -33,25 +48,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const contentLength = Number(req.headers['content-length'] || 0);
   if (contentLength > 16_000) return fail(res, 413, 'REQUEST_TOO_LARGE', 'The request is too large. Please shorten your details.');
 
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0])?.trim() || req.socket.remoteAddress || 'unknown';
+  const ip = getClientIp(req);
   if (isRateLimited(ip)) {
     res.setHeader('Retry-After', '60');
     return fail(res, 429, 'RATE_LIMITED', 'Too many requests. Please wait a minute and try again.');
   }
 
-  const parsedRequest = emailRequestSchema.safeParse(req.body);
+  const parsedRequest = emailRequestSchema.safeParse(getRequestBody(req));
   if (!parsedRequest.success) return fail(res, 400, 'INVALID_REQUEST', 'Check the form details and try again.');
 
+  const raw = await generateWithAi(parsedRequest.data);
+  const email = parseAiResponse(raw);
+  return res.status(200).json({ success: true, data: email });
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const raw = await generateWithAi(parsedRequest.data);
-    const email = parseAiResponse(raw);
-    return res.status(200).json({ success: true, data: email });
+    return await handleRequest(req, res);
   } catch (error) {
     if (error instanceof ProviderConfigurationError) return fail(res, 503, 'SERVICE_NOT_CONFIGURED', 'Email generation is not configured yet.');
     if (error instanceof ProviderRateLimitError) return fail(res, 429, 'PROVIDER_RATE_LIMITED', 'The email service is busy. Please wait a moment and try again.');
     if (error instanceof ProviderTimeoutError) return fail(res, 504, 'GENERATION_TIMEOUT', 'Email generation took too long. Please try again.');
     if (error instanceof InvalidAiResponseError) return fail(res, 502, 'INVALID_AI_RESPONSE', 'The email service returned an incomplete draft. Please try again.');
-    return fail(res, 502, 'GENERATION_FAILED', 'Unable to generate the email right now.');
+    return fail(res, 500, 'INTERNAL_ERROR', 'The email service encountered an unexpected error. Please try again.');
   }
 }
