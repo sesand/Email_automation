@@ -120,7 +120,7 @@ async function callGeminiModel(config: ProviderConfig, model: string, input: Val
     return content;
   } catch (error) {
     if (error instanceof ModelAttemptError) throw error;
-    if (error instanceof DOMException && error.name === 'AbortError') throw new ModelAttemptError('timeout', true);
+    if (error instanceof Error && error.name === 'AbortError') throw new ModelAttemptError('timeout', true);
     throw new ModelAttemptError('request', true);
   } finally {
     clearTimeout(timeout);
@@ -135,9 +135,12 @@ export async function generateWithAi(input: ValidatedEmailRequest): Promise<stri
     try {
       return await callGeminiModel(config, model, input);
     } catch (error) {
-      if (!(error instanceof ModelAttemptError)) throw error;
-      lastError = error;
-      if (!error.retryable) break;
+      if (error instanceof ModelAttemptError) {
+        lastError = error;
+        if (!error.retryable) break;
+      } else {
+        lastError = new ModelAttemptError('request', true);
+      }
     }
   }
 

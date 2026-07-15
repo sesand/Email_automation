@@ -33,6 +33,15 @@ describe('Gemini provider fallback', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('gemini-3.5-flash');
   });
 
+  it('falls back when the runtime fetch implementation rejects unexpectedly', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(successResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(generateWithAi(input)).resolves.toContain('"subject":"Interview"');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not fall back when credentials are rejected', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 403 }));
     vi.stubGlobal('fetch', fetchMock);
