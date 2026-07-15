@@ -1,5 +1,3 @@
-import { generatedEmailSchema } from './requestSchema';
-
 export class InvalidAiResponseError extends Error {
   readonly code = 'INVALID_AI_RESPONSE' as const;
   constructor() { super('The AI provider returned an invalid email response.'); }
@@ -24,11 +22,14 @@ export function parseAiResponse(raw: string) {
   if (!raw || raw.length > 50_000) throw new InvalidAiResponseError();
   try {
     const parsed: unknown = JSON.parse(extractJsonObject(raw));
-    const result = generatedEmailSchema.safeParse(parsed);
-    if (!result.success) throw new InvalidAiResponseError();
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new InvalidAiResponseError();
+    const value = parsed as Record<string, unknown>;
+    if (Object.keys(value).some((key) => key !== 'subject' && key !== 'body')) throw new InvalidAiResponseError();
+    if (typeof value.subject !== 'string' || !value.subject.trim() || value.subject.trim().length > 300) throw new InvalidAiResponseError();
+    if (typeof value.body !== 'string' || !value.body.trim() || value.body.trim().length > 10_000) throw new InvalidAiResponseError();
     return {
-      subject: stripUnsafeControls(result.data.subject).trim(),
-      body: stripUnsafeControls(result.data.body).replace(/\r\n/g, '\n').trim(),
+      subject: stripUnsafeControls(value.subject).trim(),
+      body: stripUnsafeControls(value.body).replace(/\r\n/g, '\n').trim(),
     };
   } catch (error) {
     if (error instanceof InvalidAiResponseError) throw error;

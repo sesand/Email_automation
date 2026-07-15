@@ -7,7 +7,7 @@ import {
   ProviderTimeoutError,
 } from './lib/aiProvider';
 import { InvalidAiResponseError, parseAiResponse } from './lib/parseAiResponse';
-import { emailRequestSchema } from './lib/requestSchema';
+import type { EmailLength, Tone, ValidatedEmailRequest } from './lib/requestSchema';
 
 const WINDOW_MS = 60_000;
 const MAX_REQUESTS = 10;
@@ -61,6 +61,34 @@ function getRequestBody(req: VercelRequest): unknown {
   }
 }
 
+function stringField(value: unknown, min: number, max: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length >= min && trimmed.length <= max ? trimmed : undefined;
+}
+
+function validateRequest(value: unknown): ValidatedEmailRequest | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const body = value as Record<string, unknown>;
+  if (body.mode !== 'generate' && body.mode !== 'refine') return undefined;
+  const purpose = stringField(body.purpose, 3, 200);
+  const recipientName = stringField(body.recipientName, 2, 100);
+  const recipientDesignation = body.recipientDesignation === undefined ? '' : stringField(body.recipientDesignation, 0, 120);
+  const keyPoints = stringField(body.keyPoints, 10, 2_000);
+  const tone = ['Professional', 'Friendly', 'Formal', 'Assertive'].includes(String(body.tone)) ? body.tone as Tone : undefined;
+  const length = ['Concise', 'Standard', 'Detailed'].includes(String(body.length)) ? body.length as EmailLength : undefined;
+  if (!purpose || !recipientName || recipientDesignation === undefined || !keyPoints || !tone || !length) return undefined;
+  const base = { purpose, recipientName, recipientDesignation, keyPoints, tone, length };
+  if (body.mode === 'generate') return { ...base, mode: 'generate' };
+  if (typeof body.currentEmail !== 'object' || body.currentEmail === null || Array.isArray(body.currentEmail)) return undefined;
+  const current = body.currentEmail as Record<string, unknown>;
+  const subject = stringField(current.subject, 1, 300);
+  const emailBody = stringField(current.body, 1, 10_000);
+  const refinementInstruction = stringField(body.refinementInstruction, 3, 500);
+  if (!subject || !emailBody || !refinementInstruction) return undefined;
+  return { ...base, mode: 'refine', currentEmail: { subject, body: emailBody }, refinementInstruction };
+}
+
 async function handleRequest(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -78,17 +106,17 @@ async function handleRequest(req: VercelRequest, res: VercelResponse) {
     return fail(res, 429, 'RATE_LIMITED', 'Too many requests. Please wait a minute and try again.');
   }
 
-  let parsedRequest;
+  let parsedRequest: ValidatedEmailRequest | undefined;
   try {
-    parsedRequest = emailRequestSchema.safeParse(getRequestBody(req));
+    parsedRequest = validateRequest(getRequestBody(req));
   } catch (error) {
     throw new HandlerStageError('validation', error);
   }
-  if (!parsedRequest.success) return fail(res, 400, 'INVALID_REQUEST', 'Check the form details and try again.');
+  if (!parsedRequest) return fail(res, 400, 'INVALID_REQUEST', 'Check the form details and try again.');
 
   let raw: string;
   try {
-    raw = await generateWithAi(parsedRequest.data);
+    raw = await generateWithAi(parsedRequest);
   } catch (error) {
     if (isExpectedServiceError(error)) throw error;
     throw new HandlerStageError('provider', error);
