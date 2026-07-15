@@ -46,21 +46,6 @@ function fail(res: VercelResponse, status: number, code: string, message: string
   return res.status(status).json({ success: false, error: { code, message } });
 }
 
-function diagnosticFail(res: VercelResponse, error: HandlerStageError) {
-  const cause = error.cause;
-  const diagnostic = cause instanceof Error
-    ? `${cause.name}: ${cause.message}`.slice(0, 180)
-    : typeof cause;
-  return res.status(500).json({
-    success: false,
-    error: {
-      code: `INTERNAL_${error.stage.toUpperCase()}_ERROR`,
-      message: 'The email service encountered an unexpected error. Please try again.',
-      diagnostic,
-    },
-  });
-}
-
 function getClientIp(req: VercelRequest): string {
   const forwarded = req.headers['x-forwarded-for'];
   const forwardedIp = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0])?.trim();
@@ -68,9 +53,10 @@ function getClientIp(req: VercelRequest): string {
 }
 
 function getRequestBody(req: VercelRequest): unknown {
-  if (typeof req.body !== 'string') return req.body;
   try {
-    return JSON.parse(req.body) as unknown;
+    const body: unknown = req.body;
+    if (typeof body !== 'string') return body;
+    return JSON.parse(body) as unknown;
   } catch {
     return undefined;
   }
@@ -172,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       causeName: error instanceof HandlerStageError && error.cause instanceof Error ? error.cause.name : undefined,
     });
     if (error instanceof HandlerStageError) {
-      return diagnosticFail(res, error);
+      return fail(res, 500, `INTERNAL_${error.stage.toUpperCase()}_ERROR`, 'The email service encountered an unexpected error. Please try again.');
     }
     return fail(res, 500, 'INTERNAL_ERROR', 'The email service encountered an unexpected error. Please try again.');
   }
