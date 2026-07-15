@@ -1,6 +1,7 @@
 import { generatedEmailSchema } from './requestSchema';
 
 export class InvalidAiResponseError extends Error {
+  readonly code = 'INVALID_AI_RESPONSE' as const;
   constructor() { super('The AI provider returned an invalid email response.'); }
 }
 

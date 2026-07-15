@@ -72,17 +72,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     return await handleRequest(req, res);
   } catch (error) {
-    if (error instanceof ProviderConfigurationError) return fail(res, 503, 'SERVICE_NOT_CONFIGURED', 'Email generation is not configured yet.');
-    if (error instanceof ProviderRateLimitError) return fail(res, 429, 'PROVIDER_RATE_LIMITED', 'The email service is busy. Please wait a moment and try again.');
-    if (error instanceof ProviderTimeoutError) return fail(res, 504, 'GENERATION_TIMEOUT', 'Email generation took too long. Please try again.');
-    if (error instanceof ProviderRequestError && (error.status === 401 || error.status === 403)) {
+    const errorCode = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+    const providerStatus = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
+      ? error.status
+      : undefined;
+    if (error instanceof ProviderConfigurationError || errorCode === 'PROVIDER_CONFIGURATION') return fail(res, 503, 'SERVICE_NOT_CONFIGURED', 'Email generation is not configured yet.');
+    if (error instanceof ProviderRateLimitError || errorCode === 'PROVIDER_RATE_LIMIT') return fail(res, 429, 'PROVIDER_RATE_LIMITED', 'The email service is busy. Please wait a moment and try again.');
+    if (error instanceof ProviderTimeoutError || errorCode === 'PROVIDER_TIMEOUT') return fail(res, 504, 'GENERATION_TIMEOUT', 'Email generation took too long. Please try again.');
+    if ((error instanceof ProviderRequestError || errorCode === 'PROVIDER_REQUEST') && (providerStatus === 401 || providerStatus === 403)) {
       return fail(res, 503, 'PROVIDER_AUTH_FAILED', 'Gemini rejected the configured API key. Update GEMINI_API_KEY in Vercel and redeploy.');
     }
-    if (error instanceof ProviderRequestError && error.status === 400) {
+    if ((error instanceof ProviderRequestError || errorCode === 'PROVIDER_REQUEST') && providerStatus === 400) {
       return fail(res, 502, 'PROVIDER_REQUEST_REJECTED', 'Gemini rejected the model request. Check the configured Gemini model names.');
     }
-    if (error instanceof ProviderRequestError) return fail(res, 502, 'GENERATION_FAILED', 'Unable to generate the email right now.');
-    if (error instanceof InvalidAiResponseError) return fail(res, 502, 'INVALID_AI_RESPONSE', 'The email service returned an incomplete draft. Please try again.');
+    if (error instanceof ProviderRequestError || errorCode === 'PROVIDER_REQUEST') return fail(res, 502, 'GENERATION_FAILED', 'Unable to generate the email right now.');
+    if (error instanceof InvalidAiResponseError || errorCode === 'INVALID_AI_RESPONSE') return fail(res, 502, 'INVALID_AI_RESPONSE', 'The email service returned an incomplete draft. Please try again.');
+    console.error('Unhandled generate-email error', {
+      name: error instanceof Error ? error.name : typeof error,
+      code: typeof errorCode === 'string' ? errorCode : undefined,
+    });
     return fail(res, 500, 'INTERNAL_ERROR', 'The email service encountered an unexpected error. Please try again.');
   }
 }

@@ -13,10 +13,17 @@ interface GeminiResponse {
   promptFeedback?: { blockReason?: string };
 }
 
-export class ProviderConfigurationError extends Error {}
-export class ProviderRateLimitError extends Error {}
-export class ProviderTimeoutError extends Error {}
+export class ProviderConfigurationError extends Error {
+  readonly code = 'PROVIDER_CONFIGURATION' as const;
+}
+export class ProviderRateLimitError extends Error {
+  readonly code = 'PROVIDER_RATE_LIMIT' as const;
+}
+export class ProviderTimeoutError extends Error {
+  readonly code = 'PROVIDER_TIMEOUT' as const;
+}
 export class ProviderRequestError extends Error {
+  readonly code = 'PROVIDER_REQUEST' as const;
   constructor(message: string, public readonly status?: number) { super(message); }
 }
 

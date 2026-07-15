@@ -51,4 +51,17 @@ describe('generate-email handler', () => {
     await handler(request, response as unknown as VercelResponse);
     expect(response.status).toHaveBeenCalledWith(400);
   });
+
+  it('recognizes provider errors by their stable code across bundle boundaries', async () => {
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('GEMINI_API_KEY', 'configured-key');
+    const request = { method: 'POST', headers: {}, body: validBody } as unknown as VercelRequest;
+    const response = createResponse();
+    await handler(request, response as unknown as VercelResponse);
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(response.json).toHaveBeenCalledWith({
+      success: false,
+      error: { code: 'SERVICE_NOT_CONFIGURED', message: 'Email generation is not configured yet.' },
+    });
+  });
 });
