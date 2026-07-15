@@ -13,6 +13,24 @@ const WINDOW_MS = 60_000;
 const MAX_REQUESTS = 10;
 const requestBuckets = new Map<string, { count: number; resetAt: number }>();
 
+class HandlerStageError extends Error {
+  readonly code = 'HANDLER_STAGE' as const;
+  constructor(public readonly stage: 'validation' | 'provider' | 'parsing', cause: unknown) {
+    super(`Email handler failed during ${stage}.`, { cause });
+  }
+}
+
+function getErrorCode(error: unknown): unknown {
+  return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+}
+
+function isExpectedServiceError(error: unknown): boolean {
+  return [
+    'PROVIDER_CONFIGURATION', 'PROVIDER_RATE_LIMIT', 'PROVIDER_TIMEOUT',
+    'PROVIDER_REQUEST', 'INVALID_AI_RESPONSE',
+  ].includes(String(getErrorCode(error)));
+}
+
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
   const bucket = requestBuckets.get(ip);
@@ -60,11 +78,28 @@ async function handleRequest(req: VercelRequest, res: VercelResponse) {
     return fail(res, 429, 'RATE_LIMITED', 'Too many requests. Please wait a minute and try again.');
   }
 
-  const parsedRequest = emailRequestSchema.safeParse(getRequestBody(req));
+  let parsedRequest: ReturnType<typeof emailRequestSchema.safeParse>;
+  try {
+    parsedRequest = emailRequestSchema.safeParse(getRequestBody(req));
+  } catch (error) {
+    throw new HandlerStageError('validation', error);
+  }
   if (!parsedRequest.success) return fail(res, 400, 'INVALID_REQUEST', 'Check the form details and try again.');
 
-  const raw = await generateWithAi(parsedRequest.data);
-  const email = parseAiResponse(raw);
+  let raw: string;
+  try {
+    raw = await generateWithAi(parsedRequest.data);
+  } catch (error) {
+    if (isExpectedServiceError(error)) throw error;
+    throw new HandlerStageError('provider', error);
+  }
+  let email: ReturnType<typeof parseAiResponse>;
+  try {
+    email = parseAiResponse(raw);
+  } catch (error) {
+    if (isExpectedServiceError(error)) throw error;
+    throw new HandlerStageError('parsing', error);
+  }
   return res.status(200).json({ success: true, data: email });
 }
 
@@ -72,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     return await handleRequest(req, res);
   } catch (error) {
-    const errorCode = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+    const errorCode = getErrorCode(error);
     const providerStatus = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
       ? error.status
       : undefined;
@@ -90,7 +125,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('Unhandled generate-email error', {
       name: error instanceof Error ? error.name : typeof error,
       code: typeof errorCode === 'string' ? errorCode : undefined,
+      stage: error instanceof HandlerStageError ? error.stage : undefined,
+      causeName: error instanceof HandlerStageError && error.cause instanceof Error ? error.cause.name : undefined,
     });
+    if (error instanceof HandlerStageError) {
+      return fail(res, 500, `INTERNAL_${error.stage.toUpperCase()}_ERROR`, 'The email service encountered an unexpected error. Please try again.');
+    }
     return fail(res, 500, 'INTERNAL_ERROR', 'The email service encountered an unexpected error. Please try again.');
   }
 }
