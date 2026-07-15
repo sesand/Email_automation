@@ -78,7 +78,7 @@ async function handleRequest(req: VercelRequest, res: VercelResponse) {
     return fail(res, 429, 'RATE_LIMITED', 'Too many requests. Please wait a minute and try again.');
   }
 
-  let parsedRequest: ReturnType<typeof emailRequestSchema.safeParse>;
+  let parsedRequest;
   try {
     parsedRequest = emailRequestSchema.safeParse(getRequestBody(req));
   } catch (error) {
