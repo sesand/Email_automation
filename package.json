@@ -2,7 +2,6 @@
   "name": "bss-recruiter-email-studio",
   "private": true,
   "version": "1.0.0",
-  "type": "module",
   "scripts": {
     "dev": "vercel dev",
     "dev:client": "vite",
