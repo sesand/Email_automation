@@ -20,7 +20,7 @@ describe('Gemini provider fallback', () => {
     vi.stubEnv('AI_FALLBACK_MODELS', 'gemini-3.5-flash,gemini-3.1-flash-lite');
   });
 
-  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it('falls back from Pro to Flash on a transient provider failure', async () => {
     const fetchMock = vi.fn()
@@ -40,6 +40,11 @@ describe('Gemini provider fallback', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(generateWithAi(input)).resolves.toContain('"subject":"Interview"');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('converts request setup failures into a controlled provider error', async () => {
+    vi.stubGlobal('AbortController', undefined);
+    await expect(generateWithAi(input)).rejects.toMatchObject({ code: 'PROVIDER_REQUEST' });
   });
 
   it('does not fall back when credentials are rejected', async () => {

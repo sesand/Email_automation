@@ -85,9 +85,10 @@ export function buildUserPrompt(input: ValidatedEmailRequest): string {
 }
 
 async function callGeminiModel(config: ProviderConfig, model: string, input: ValidatedEmailRequest): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
     const response = await fetch(`${config.baseUrl}/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: { 'x-goog-api-key': config.apiKey, 'Content-Type': 'application/json' },
@@ -130,7 +131,7 @@ async function callGeminiModel(config: ProviderConfig, model: string, input: Val
     if (error instanceof Error && error.name === 'AbortError') throw new ModelAttemptError('timeout', true);
     throw new ModelAttemptError('request', true);
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
   }
 }
 
